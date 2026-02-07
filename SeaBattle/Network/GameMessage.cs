@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+﻿using Newtonsoft.Json;
 using SeaBattle.Enums;
 
 namespace SeaBattle.Network
@@ -18,12 +18,12 @@ namespace SeaBattle.Network
 
         public string ToJson()
         {
-            return JsonSerializer.Serialize(this);
+            return JsonConvert.SerializeObject(this);
         }
 
         public static GameMessage FromJson(string json)
         {
-            return JsonSerializer.Deserialize<GameMessage>(json);
+            return JsonConvert.DeserializeObject<GameMessage>(json);
         }
     }
 
@@ -37,12 +37,6 @@ namespace SeaBattle.Network
     {
         public int X { get; set; }
         public int Y { get; set; }
-        public CellState Result { get; set; }
-        public bool IsShipDestroyed { get; set; }
-    }
-
-    public class ConnectionData
-    {
-        public string PlayerName { get; set; }
+        public string Result { get; set; }
     }
 }

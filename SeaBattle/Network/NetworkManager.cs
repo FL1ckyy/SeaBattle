@@ -1,8 +1,10 @@
 ﻿using System;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
+using Newtonsoft.Json;
 using SeaBattle.Enums;
 
 namespace SeaBattle.Network
@@ -19,6 +21,7 @@ namespace SeaBattle.Network
 
         public event Action<string> MessageReceived;
         public event Action<string> StatusChanged;
+        public event Action Connected;
 
         public NetworkManager(GameManager manager)
         {
@@ -34,21 +37,21 @@ namespace SeaBattle.Network
                 server.Start();
                 IsHost = true;
 
-                StatusChanged?.Invoke($"Сервер запущен на порту {port}. Ожидание подключения...");
+                StatusChanged?.Invoke($"Сервер запущен на порту {port}...");
 
                 client = await server.AcceptTcpClientAsync();
                 stream = client.GetStream();
                 IsConnected = true;
 
                 StatusChanged?.Invoke("Игрок подключен!");
-                MessageReceived?.Invoke("Ожидайте начала игры...");
+                MessageReceived?.Invoke("Соперник подключился!");
+                Connected?.Invoke();
 
-                // Начинаем прослушивание сообщений
                 _ = Task.Run(ReceiveMessages);
             }
             catch (Exception ex)
             {
-                StatusChanged?.Invoke($"Ошибка сервера: {ex.Message}");
+                StatusChanged?.Invoke($"Ошибка: {ex.Message}");
             }
         }
 
@@ -63,9 +66,9 @@ namespace SeaBattle.Network
                 IsHost = false;
 
                 StatusChanged?.Invoke($"Подключено к {ip}:{port}");
-                MessageReceived?.Invoke("Ожидайте начала игры...");
+                MessageReceived?.Invoke("Подключение успешно!");
+                Connected?.Invoke();
 
-                // Начинаем прослушивание сообщений
                 _ = Task.Run(ReceiveMessages);
             }
             catch (Exception ex)
@@ -76,10 +79,14 @@ namespace SeaBattle.Network
 
         public void Disconnect()
         {
-            stream?.Close();
-            client?.Close();
-            server?.Stop();
-            IsConnected = false;
+            try
+            {
+                stream?.Close();
+                client?.Close();
+                server?.Stop();
+                IsConnected = false;
+            }
+            catch { }
         }
 
         public void SendMessage(MessageType type, object data)
@@ -104,7 +111,7 @@ namespace SeaBattle.Network
             SendMessage(MessageType.Shot, new ShotData { X = x, Y = y });
         }
 
-        public void SendShotResult(int x, int y, CellState result)
+        public void SendShotResult(int x, int y, string result)
         {
             SendMessage(MessageType.ShotResult, new ShotResultData
             {
@@ -120,7 +127,7 @@ namespace SeaBattle.Network
 
             try
             {
-                while (IsConnected)
+                while (IsConnected && client?.Connected == true)
                 {
                     int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
                     if (bytesRead == 0) break;
@@ -137,14 +144,17 @@ namespace SeaBattle.Network
                     }
                 }
             }
-            catch (Exception)
+            catch (IOException)
             {
-                // Соединение разорвано
+                StatusChanged?.Invoke("Соединение разорвано");
+            }
+            catch (Exception ex)
+            {
+                StatusChanged?.Invoke($"Ошибка: {ex.Message}");
             }
             finally
             {
                 Disconnect();
-                StatusChanged?.Invoke("Соединение разорвано");
             }
         }
 
@@ -156,29 +166,33 @@ namespace SeaBattle.Network
 
                 switch (message.Type)
                 {
+                    case MessageType.StartGame:
+                        MessageReceived?.Invoke("Игра началась!");
+                        if (!IsHost)
+                        {
+                            gameManager.StartGameAsClient();
+                        }
+                        break;
+
                     case MessageType.Shot:
-                        var shotData = JsonSerializer.Deserialize<ShotData>(message.Data.ToString());
-                        gameManager.ProcessShot(shotData.X, shotData.Y, false);
+                        var shotData = JsonConvert.DeserializeObject<ShotData>(message.Data.ToString());
+                        gameManager.ProcessIncomingShot(shotData.X, shotData.Y);
                         break;
 
                     case MessageType.ShotResult:
-                        var resultData = JsonSerializer.Deserialize<ShotResultData>(message.Data.ToString());
-                        // Обновляем поле врага
-                        gameManager.EnemyBoard.Cells[resultData.X, resultData.Y].State = resultData.Result;
-                        break;
-
-                    case MessageType.StartGame:
-                        gameManager.StartGame();
+                        var resultData = JsonConvert.DeserializeObject<ShotResultData>(message.Data.ToString());
+                        gameManager.ProcessShotResult(resultData.X, resultData.Y, resultData.Result);
                         break;
 
                     case MessageType.GameOver:
                         gameManager.ChangeState(GameState.GameOver);
+                        MessageReceived?.Invoke("Вы победили!");
                         break;
                 }
             }
             catch (Exception ex)
             {
-                MessageReceived?.Invoke($"Ошибка обработки сообщения: {ex.Message}");
+                MessageReceived?.Invoke($"Ошибка: {ex.Message}");
             }
         }
     }

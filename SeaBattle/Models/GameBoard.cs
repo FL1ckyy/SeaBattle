@@ -159,13 +159,23 @@ namespace SeaBattle.Models
 
         public bool AllShipsSunk()
         {
+         
+            if (Ships == null || Ships.Count == 0)
+                return false;
+
             foreach (var ship in Ships)
             {
+                bool shipDestroyed = true;
                 foreach (var deck in ship.Decks)
                 {
                     if (Cells[deck.X, deck.Y].State != CellState.Sunk)
-                        return false;
+                    {
+                        shipDestroyed = false;
+                        break;
+                    }
                 }
+                if (!shipDestroyed)
+                    return false;
             }
             return true;
         }
